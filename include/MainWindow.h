@@ -9,6 +9,10 @@ class MainWindow : public QMainWindow
 {
 	Q_OBJECT
 
+
+public slots:
+	void openFile();
+
 public:
 	MainWindow(QWidget* parent = nullptr);
 	~MainWindow();
