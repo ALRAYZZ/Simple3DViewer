@@ -4,6 +4,7 @@
 #include <QFileDialog>
 #include "MainWindow.h"
 #include "D3D12Viewport.h"
+#include "Model.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
@@ -18,6 +19,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 	resize(800, 600);
 	viewport = new D3D12Viewport(this);
 	setCentralWidget(viewport);
+	model = new Model();
 }
 
 MainWindow::~MainWindow() {}
@@ -27,7 +29,10 @@ void MainWindow::openFile()
 	QString filePath = QFileDialog::getOpenFileName(this, "Open 3D Model", "", "3D Models (*.obj *.fbx *.gltf)");
 	if (!filePath.isEmpty())
 	{
-		// TODO Load file
-		viewport->update(); // Placeholder to trigger a redraw
+		if (model->loadFromFile(filePath))
+		{
+			// Pass to viewport
+			viewport->update(); // Placeholder to trigger a redraw
+		}
 	}
 }

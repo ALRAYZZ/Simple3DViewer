@@ -4,6 +4,7 @@
 #include <QMainWindow>
 
 class D3D12Viewport;
+class Model;
 
 class MainWindow : public QMainWindow
 {
@@ -19,4 +20,5 @@ public:
 
 private:
 	D3D12Viewport* viewport;
+	Model* model;
 };

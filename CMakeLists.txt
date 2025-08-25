@@ -25,9 +25,11 @@ add_executable(Simple3DViewer
 	src/main.cpp
 	src/MainWindow.cpp
 	src/D3D12Viewport.cpp
+	src/Model.cpp
 	include/MainWindow.h
 	include/D3D12Viewport.h
-)
+	include/Model.h
+ )
 target_link_libraries(Simple3DViewer PRIVATE
 	Qt6::Widgets
 	${D3D12_LIBRARY}
