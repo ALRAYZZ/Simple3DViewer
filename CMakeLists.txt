@@ -24,9 +24,10 @@ include_directories(include)
 add_executable(Simple3DViewer
 	src/main.cpp
 	src/MainWindow.cpp
+	src/D3D12Viewport.cpp
 	include/MainWindow.h
+	include/D3D12Viewport.h
 )
-
 target_link_libraries(Simple3DViewer PRIVATE
 	Qt6::Widgets
 	${D3D12_LIBRARY}
@@ -34,6 +35,7 @@ target_link_libraries(Simple3DViewer PRIVATE
 	${D3DCompiler_LIBRARY}
 )
 
+# Post-build step to copy Qt DLLs (Windows-specific)
 if(WIN32 AND Qt6_FOUND)
 	# Find windeploy tool
 	get_target_property(Qt6_qmake_location Qt6::qmake IMPORTED_LOCATION)
