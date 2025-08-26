@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QWheelEvent>
+#include <QDebug>
 
 using namespace DirectX;
 
@@ -19,6 +21,8 @@ D3D12Viewport::D3D12Viewport(QWidget* parent) : QWidget(parent), frameIndex(0), 
 	setAttribute(Qt::WA_OpaquePaintEvent, true);
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setFocusPolicy(Qt::StrongFocus);
+
+	leftButtonPressed = false;
 
 	winId();
 
@@ -35,7 +39,6 @@ D3D12Viewport::D3D12Viewport(QWidget* parent) : QWidget(parent), frameIndex(0), 
 		throw;
 	}
 }
-
 D3D12Viewport::~D3D12Viewport()
 {
 	// Wait for GPU to finish
@@ -52,6 +55,8 @@ D3D12Viewport::~D3D12Viewport()
 	if (rootSignature) rootSignature.Reset();
 	if (pipelineState) pipelineState.Reset();
 }
+
+
 
 // Helper function to get shader path
 std::wstring GetShaderPath(const std::wstring& shaderName)
@@ -86,7 +91,6 @@ std::wstring GetShaderPath(const std::wstring& shaderName)
 	}
 	return shaderName; // Fallback to original name
 }
-
 // Set up core D3D12 components to draw frames to a Qt widget
 void D3D12Viewport::initializeD3D12()
 {
@@ -199,10 +203,12 @@ void D3D12Viewport::initializeD3D12()
 
 	// Map and initialize constant buffer
 	void* cbData;
-	if (FAILED(constantBuffer->Map(0, nullptr, &cbData)))
+	D3D12_RANGE range = { 0, 0 };
+	if (FAILED(constantBuffer->Map(0, &range, &cbData)))
 	{
 		throw std::runtime_error("Failed to map constant buffer");
 	}
+	XMStoreFloat4x4(&mvpMatrix, XMMatrixIdentity());
 	memcpy(cbData, &mvpMatrix, sizeof(XMFLOAT4X4));
 	constantBuffer->Unmap(0, nullptr);
 
@@ -289,7 +295,7 @@ void D3D12Viewport::initializeD3D12()
 		throw std::runtime_error("Failed to create graphics pipeline state");
 	}
 }
-
+// Load model data into GPU buffers
 void D3D12Viewport::loadModel(const Model* model)
 {
 	if (!model)
@@ -393,13 +399,20 @@ void D3D12Viewport::loadModel(const Model* model)
 		throw;
 	}
 }
-
 // Renders frame to the current back buffer and presents it
 void D3D12Viewport::paintEvent(QPaintEvent*)
 {
 	try
 	{
 		qDebug() << "Rendering frame, indexCount:" << indexCount;
+
+		// Update MVP matrix
+		mvpMatrix = camera.getMVPMatrix((float)width() / (float)height());
+		void* cbData;
+		D3D12_RANGE range = { 0, 0 };
+		constantBuffer->Map(0, &range, &cbData);
+		memcpy(cbData, &mvpMatrix, sizeof(XMFLOAT4X4));
+		constantBuffer->Unmap(0, nullptr);
 
 		commandAllocator->Reset();
 		commandList->Reset(commandAllocator.Get(), nullptr);
@@ -418,13 +431,27 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 		const float clearColor[] = { 0.2f, 0.2f, 0.2f, 1.0f };
 		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
+		// Set viewport
+		D3D12_VIEWPORT viewport = {};
+		viewport.TopLeftX = 0;
+		viewport.TopLeftY = 0;
+		viewport.Width = static_cast<float>(width());
+		viewport.Height = static_cast<float>(height());
+		viewport.MinDepth = 0.0f;
+		viewport.MaxDepth = 1.0f;
+		commandList->RSSetViewports(1, &viewport);
+
+		// Set scissor rect
+		D3D12_RECT scissorRect = { 0, 0, width(), height() };
+		commandList->RSSetScissorRects(1, &scissorRect);
+
 		if (indexCount > 0)
 		{
 			commandList->SetGraphicsRootSignature(rootSignature.Get());
+			commandList->SetPipelineState(pipelineState.Get());
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetIndexBuffer(&indexBufferView);
-			// Use the constant buffer instead of vertex buffer for the MVP matrix
 			commandList->SetGraphicsRootConstantBufferView(0, constantBuffer->GetGPUVirtualAddress());
 			commandList->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
 		}
@@ -455,7 +482,6 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 		qCritical() << "Unknown exception in paintEvent";
 	}
 }
-
 // Rebuild rendering pipeline when window changes size, since buffers depend on the window size
 void D3D12Viewport::resizeEvent(QResizeEvent *event)
 {
@@ -477,4 +503,31 @@ void D3D12Viewport::resizeEvent(QResizeEvent *event)
 		}
 	}
 	QWidget::resizeEvent(event);
+}
+
+
+// Mouse event handlers
+void D3D12Viewport::mousePressEvent(QMouseEvent *event)
+{
+	if (event->button() == Qt::LeftButton)
+	{
+		leftButtonPressed = true;
+		lastMousePos = event->pos();
+	}
+}
+void D3D12Viewport::mouseMoveEvent(QMouseEvent* event)
+{
+	if (leftButtonPressed)
+	{
+		float dx = event->pos().x() - lastMousePos.x();
+		float dy = event->pos().y() - lastMousePos.y();
+		camera.orbit(dx, dy);
+		lastMousePos = event->pos();
+		update();
+	}
+}
+void D3D12Viewport::wheelEvent(QWheelEvent* event)
+{
+	camera.zoom(event->angleDelta().y() / 120.0f); // Scroll sensitivity
+	update();
 }

@@ -11,6 +11,8 @@
 #include "Model.h"
 #include <QMatrix4x4>
 #include <DirectXMath.h>
+#include "Camera.h"
+#include <QMouseEvent>
 
 using Microsoft::WRL::ComPtr;
 
@@ -30,6 +32,10 @@ protected:
 	void initializeD3D12();
 	void paintEvent(QPaintEvent* event) override;
 	void resizeEvent(QResizeEvent* event) override;
+
+	void mousePressEvent(QMouseEvent* event) override;
+	void mouseMoveEvent(QMouseEvent* event) override;
+	void wheelEvent(QWheelEvent* event) override;
 
 private:
 	// D3D12 core components that need to be managed to render within the widget
@@ -56,4 +62,8 @@ private:
 	D3D12_INDEX_BUFFER_VIEW indexBufferView; // View describing the index buffer
 	unsigned int indexCount; // Number of indices to draw
 	DirectX::XMFLOAT4X4 mvpMatrix;
+
+	Camera camera; // Camera for view and projection matrices
+	QPoint lastMousePos; // Last mouse position for camera control
+	bool leftButtonPressed; // Is the left mouse button pressed
 };
