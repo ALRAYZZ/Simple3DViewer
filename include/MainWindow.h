@@ -2,6 +2,7 @@
 
 #pragma once
 #include <QMainWindow>
+#include <QPushButton>
 
 class D3D12Viewport;
 class Model;
@@ -13,6 +14,7 @@ class MainWindow : public QMainWindow
 
 public slots:
 	void openFile();
+	void toggleWireframe();
 
 public:
 	MainWindow(QWidget* parent = nullptr);
@@ -21,4 +23,5 @@ public:
 private:
 	D3D12Viewport* viewport;
 	Model* model;
+	QPushButton* wireframeButton;
 };

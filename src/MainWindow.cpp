@@ -5,6 +5,7 @@
 #include "MainWindow.h"
 #include "D3D12Viewport.h"
 #include "Model.h"
+#include <QVBoxLayout>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 {
@@ -19,6 +20,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent)
 	resize(800, 600);
 	viewport = new D3D12Viewport(this);
 	setCentralWidget(viewport);
+
+	QWidget* centralWidget = new QWidget(this);
+	QVBoxLayout* layout = new QVBoxLayout(centralWidget);
+	layout->addWidget(viewport);
+	wireframeButton = new QPushButton("Toggle Wireframe", centralWidget);
+	layout->addWidget(wireframeButton);
+	setCentralWidget(centralWidget);
+	connect(wireframeButton, &QPushButton::clicked, this, &MainWindow::toggleWireframe);
+
 	model = new Model();
 }
 
@@ -35,4 +45,9 @@ void MainWindow::openFile()
 			viewport->update(); // Placeholder to trigger a redraw
 		}
 	}
+}
+
+void MainWindow::toggleWireframe()
+{
+	viewport->toggleWireframe();
 }

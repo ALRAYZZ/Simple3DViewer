@@ -27,6 +27,7 @@ public:
 	// Override paintEngine to return nullptr for Direct3D rendering
 	QPaintEngine* paintEngine() const override { return nullptr; }
 	void loadModel(const Model* model);
+	void toggleWireframe();
 
 protected:
 	void initializeD3D12();
@@ -66,4 +67,7 @@ private:
 	Camera camera; // Camera for view and projection matrices
 	QPoint lastMousePos; // Last mouse position for camera control
 	bool leftButtonPressed; // Is the left mouse button pressed
+
+	ComPtr<ID3D12PipelineState> pipelineStateSolid; // Pipeline state for solid rendering
+	bool isWireframe;
 };

@@ -23,6 +23,7 @@ D3D12Viewport::D3D12Viewport(QWidget* parent) : QWidget(parent), frameIndex(0), 
 	setFocusPolicy(Qt::StrongFocus);
 
 	leftButtonPressed = false;
+	isWireframe = false;
 
 	winId();
 
@@ -277,6 +278,7 @@ void D3D12Viewport::initializeD3D12()
 	blendDesc.RenderTarget[0].LogicOpEnable = FALSE;
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
+	// Pipeline state creation
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.InputLayout = { inputLayout, 1 };
 	psoDesc.pRootSignature = rootSignature.Get();
@@ -293,6 +295,13 @@ void D3D12Viewport::initializeD3D12()
 	if (FAILED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineState))))
 	{
 		throw std::runtime_error("Failed to create graphics pipeline state");
+	}
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDescSolid = psoDesc;
+	psoDescSolid.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; // Change to solid fill mode
+	if (FAILED(device->CreateGraphicsPipelineState(&psoDescSolid, IID_PPV_ARGS(&pipelineStateSolid))))
+	{
+		throw std::runtime_error("Failed to create solid graphics pipeline state");
 	}
 }
 // Load model data into GPU buffers
@@ -415,7 +424,7 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 		constantBuffer->Unmap(0, nullptr);
 
 		commandAllocator->Reset();
-		commandList->Reset(commandAllocator.Get(), nullptr);
+		commandList->Reset(commandAllocator.Get(), isWireframe ? pipelineState.Get() : pipelineStateSolid.Get());
 
 		D3D12_RESOURCE_BARRIER barrier = {};
 		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -448,7 +457,6 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 		if (indexCount > 0)
 		{
 			commandList->SetGraphicsRootSignature(rootSignature.Get());
-			commandList->SetPipelineState(pipelineState.Get());
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->IASetIndexBuffer(&indexBufferView);
@@ -529,5 +537,12 @@ void D3D12Viewport::mouseMoveEvent(QMouseEvent* event)
 void D3D12Viewport::wheelEvent(QWheelEvent* event)
 {
 	camera.zoom(event->angleDelta().y() / 120.0f); // Scroll sensitivity
+	update();
+}
+
+// Toggle between wireframe and solid rendering modes
+void D3D12Viewport::toggleWireframe()
+{
+	isWireframe = !isWireframe;
 	update();
 }
