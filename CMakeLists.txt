@@ -37,6 +37,21 @@ target_link_libraries(Simple3DViewer PRIVATE
 	${D3DCompiler_LIBRARY}
 )
 
+add_custom_command(TARGET Simple3DViewer POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_directory
+	"${CMAKE_SOURCE_DIR}/resources"
+	"$<TARGET_FILE_DIR:Simple3DViewer>/resources"
+	COMMENT "Copying resources directory..."
+)
+
+set(SHADER_FILES
+	resources/vertex.hlsl
+	resources/pixel.hlsl
+)
+source_group("Shaders" FILES ${SHADER_FILES})
+set_target_properties(Simple3DViewer PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+
 # Post-build step to copy Qt DLLs (Windows-specific)
 if(WIN32 AND Qt6_FOUND)
 	# Find windeploy tool

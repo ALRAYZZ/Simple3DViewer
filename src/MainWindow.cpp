@@ -31,7 +31,7 @@ void MainWindow::openFile()
 	{
 		if (model->loadFromFile(filePath))
 		{
-			// Pass to viewport
+			viewport->loadModel(model);
 			viewport->update(); // Placeholder to trigger a redraw
 		}
 	}
