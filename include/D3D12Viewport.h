@@ -16,6 +16,12 @@
 
 using Microsoft::WRL::ComPtr;
 
+struct Vertex
+{
+	QVector3D position;
+	QVector3D normal;
+};
+
 class D3D12Viewport : public QWidget
 {
 	Q_OBJECT
@@ -70,4 +76,7 @@ private:
 
 	ComPtr<ID3D12PipelineState> pipelineStateSolid; // Pipeline state for solid rendering
 	bool isWireframe;
+
+	ComPtr<ID3D12Resource> depthBuffer; // Depth buffer resource
+	ComPtr<ID3D12DescriptorHeap> dsvHeap; // Depth stencil view descriptor heap
 };

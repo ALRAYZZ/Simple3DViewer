@@ -158,6 +158,62 @@ void D3D12Viewport::initializeD3D12()
 		rtvHandle.ptr += rtvDescriptorSize;
 	}
 
+	// Create depth stencil descriptor heap
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+	dsvHeapDesc.NumDescriptors = 1;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	if (FAILED(device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvHeap))))
+	{
+		throw std::runtime_error("Failed to create depth stencil descriptor heap");
+	}
+
+	// Create depth stencil buffer
+	D3D12_RESOURCE_DESC depthDesc = {};
+	depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	depthDesc.Alignment = 0;
+	depthDesc.Width = width();
+	depthDesc.Height = height();
+	depthDesc.DepthOrArraySize = 1;
+	depthDesc.MipLevels = 1;
+	depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	depthDesc.SampleDesc.Count = 1;
+	depthDesc.SampleDesc.Quality = 0;
+	depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+	D3D12_HEAP_PROPERTIES deapthHeapProps = {};
+	deapthHeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+	deapthHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	deapthHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	deapthHeapProps.CreationNodeMask = 1;
+	deapthHeapProps.VisibleNodeMask = 1;
+
+	D3D12_CLEAR_VALUE depthClearValue = {};
+	depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+	depthClearValue.DepthStencil.Depth = 1.0f;
+	depthClearValue.DepthStencil.Stencil = 0;
+
+	if (FAILED(device->CreateCommittedResource(
+		&deapthHeapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&depthDesc,
+		D3D12_RESOURCE_STATE_DEPTH_WRITE,
+		&depthClearValue,
+		IID_PPV_ARGS(&depthBuffer)
+	)))
+	{
+		throw std::runtime_error("Failed to create depth buffer");
+	}
+
+	// Create depth stencil view
+	D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+	dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+	device->CreateDepthStencilView(depthBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+
 	// Create command allocator and command list
 	if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator))))
 	{
@@ -187,7 +243,17 @@ void D3D12Viewport::initializeD3D12()
 	D3D12_RESOURCE_DESC cbDesc = {};
 	cbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 	cbDesc.Alignment = 0;
-	cbDesc.Width = 256; // Constant buffers must be 256-byte aligned
+
+	struct ConstantBufferData
+	{
+		XMFLOAT4X4 mvpMatrix;
+		XMFLOAT4X4 modelMatrix;
+		XMFLOAT4X4 normalMatrix;
+		XMFLOAT4X4 padding;
+	};
+	static_assert((sizeof(ConstantBufferData) % 256) == 0, "Constant buffer size must be 256-byte aligned");
+	cbDesc.Width = sizeof(ConstantBufferData);
+
 	cbDesc.Height = 1;
 	cbDesc.DepthOrArraySize = 1;
 	cbDesc.MipLevels = 1;
@@ -218,7 +284,7 @@ void D3D12Viewport::initializeD3D12()
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 	rootParameters[0].Descriptor.ShaderRegister = 0;
 	rootParameters[0].Descriptor.RegisterSpace = 0;
-	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 	D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
 	rsDesc.NumParameters = 1;
@@ -267,7 +333,8 @@ void D3D12Viewport::initializeD3D12()
 	}
 
 	D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
 	// Manual blend state initialization
@@ -280,13 +347,30 @@ void D3D12Viewport::initializeD3D12()
 
 	// Pipeline state creation
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-	psoDesc.InputLayout = { inputLayout, 1 };
+	psoDesc.InputLayout = { inputLayout, 2 };
 	psoDesc.pRootSignature = rootSignature.Get();
 	psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
 	psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
-	psoDesc.RasterizerState = { D3D12_FILL_MODE_WIREFRAME, D3D12_CULL_MODE_NONE };
+	psoDesc.RasterizerState = {
+		D3D12_FILL_MODE_WIREFRAME,
+		D3D12_CULL_MODE_NONE,
+		FALSE, // FrontCounterClockwise
+		D3D12_DEFAULT_DEPTH_BIAS,
+		D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+		D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+		TRUE, // DepthClipEnable
+		FALSE, // MultisampleEnable
+		FALSE, // AntialiasedLineEnable
+		0, // ForcedSampleCount
+		D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF
+	};
 	psoDesc.BlendState = blendDesc;
-	psoDesc.DepthStencilState.DepthEnable = FALSE;
+	// Enable depth testing
+	psoDesc.DepthStencilState.DepthEnable = TRUE;
+	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+	psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	psoDesc.SampleMask = UINT_MAX;
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	psoDesc.NumRenderTargets = 1;
@@ -299,6 +383,7 @@ void D3D12Viewport::initializeD3D12()
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDescSolid = psoDesc;
 	psoDescSolid.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; // Change to solid fill mode
+	psoDescSolid.RasterizerState.CullMode = D3D12_CULL_MODE_BACK; // Enable back-face culling
 	if (FAILED(device->CreateGraphicsPipelineState(&psoDescSolid, IID_PPV_ARGS(&pipelineStateSolid))))
 	{
 		throw std::runtime_error("Failed to create solid graphics pipeline state");
@@ -317,19 +402,33 @@ void D3D12Viewport::loadModel(const Model* model)
 	{
 		qDebug() << "Starting model load...";
 
-		const auto& vertices = model->getVertices();
+		const auto& positions = model->getVertices();
 		const auto& indices = model->getIndices();
-		if (vertices.empty() || indices.empty())
+		const auto& normals = model->getNormals();
+
+		if (positions.empty() || indices.empty())
 		{
 			qCritical() << "Model has no vertices or indices";
 			indexCount = 0;
 			return;
 		}
 
-		if (vertices.size() > UINT_MAX || indices.size() > UINT_MAX)
+		if (positions.size() > UINT_MAX || indices.size() > UINT_MAX)
 		{
 			qCritical() << "Model too large for 32-bit buffers";
 			return;
+		}
+
+		// Combined vertex data (position + normal)
+		std::vector<Vertex> vertices;
+		vertices.reserve(positions.size());
+
+		for (size_t i = 0; i < positions.size(); ++i)
+		{
+			Vertex vertex;
+			vertex.position = positions[i];
+			vertex.normal = (i < normals.size()) ? normals[i] : QVector3D(0.0f, 1.0f, 0.0f);
+			vertices.push_back(vertex);
 		}
 
 
@@ -347,7 +446,7 @@ void D3D12Viewport::loadModel(const Model* model)
 		D3D12_RESOURCE_DESC vbDesc = {};
 		vbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 		vbDesc.Alignment = 0;
-		vbDesc.Width = vertices.size() * sizeof(QVector3D);
+		vbDesc.Width = vertices.size() * sizeof(Vertex);
 		vbDesc.Height = 1;
 		vbDesc.DepthOrArraySize = 1;
 		vbDesc.MipLevels = 1;
@@ -363,11 +462,11 @@ void D3D12Viewport::loadModel(const Model* model)
 		}
 		void* vbData;
 		vertexBuffer->Map(0, nullptr, &vbData);
-		memcpy(vbData, vertices.data(), vertices.size() * sizeof(QVector3D));
+		memcpy(vbData, vertices.data(), vertices.size() * sizeof(Vertex));
 		vertexBuffer->Unmap(0, nullptr);
 		vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-		vertexBufferView.SizeInBytes = static_cast<UINT>(vertices.size() * sizeof(QVector3D));
-		vertexBufferView.StrideInBytes = sizeof(QVector3D);
+		vertexBufferView.SizeInBytes = static_cast<UINT>(vertices.size() * sizeof(Vertex));
+		vertexBufferView.StrideInBytes = sizeof(Vertex);
 
 		// Create index buffer
 		D3D12_RESOURCE_DESC ibDesc = {};
@@ -415,12 +514,28 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 	{
 		qDebug() << "Rendering frame, indexCount:" << indexCount;
 
-		// Update MVP matrix
-		mvpMatrix = camera.getMVPMatrix((float)width() / (float)height());
-		void* cbData;
+		// Get matrices separately
+		auto mvpMatrix = camera.getMVPMatrix((float)width() / (float)height());
+		auto modelMatrix = XMMatrixIdentity(); 
+		auto normalMatrix = XMMatrixInverse(nullptr, XMMatrixTranspose(modelMatrix));
+
+		// Update constant buffer with all matrices
+		struct ConstantBufferData
+		{
+			XMFLOAT4X4 mvpMatrix;
+			XMFLOAT4X4 modelMatrix;
+			XMFLOAT4X4 normalMatrix;
+		} cbData;
+
+		XMStoreFloat4x4(&cbData.mvpMatrix, XMLoadFloat4x4(&mvpMatrix));
+		XMStoreFloat4x4(&cbData.modelMatrix, modelMatrix);
+		XMStoreFloat4x4(&cbData.normalMatrix, normalMatrix);
+
+		void* mappedData;
 		D3D12_RANGE range = { 0, 0 };
-		constantBuffer->Map(0, &range, &cbData);
-		memcpy(cbData, &mvpMatrix, sizeof(XMFLOAT4X4));
+		constantBuffer->Map(0, &range, &mappedData);
+		// FIX: Copy cbData instead of mvpMatrix
+		memcpy(mappedData, &cbData, sizeof(ConstantBufferData));
 		constantBuffer->Unmap(0, nullptr);
 
 		commandAllocator->Reset();
@@ -435,10 +550,14 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 
 		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
 		rtvHandle.ptr += frameIndex * device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+		commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		const float clearColor[] = { 0.2f, 0.2f, 0.2f, 1.0f };
 		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
 		// Set viewport
 		D3D12_VIEWPORT viewport = {};
@@ -495,20 +614,82 @@ void D3D12Viewport::resizeEvent(QResizeEvent *event)
 {
 	if (swapChain)
 	{
+		// Wait for GPU to finish
+		commandQueue->Signal(fence.Get(), ++fenceValue);
+		fence->SetEventOnCompletion(fenceValue, fenceEvent);
+		WaitForSingleObject(fenceEvent, INFINITE);
+
+		// Release old resources before resizing
 		for (UINT i = 0; i < 2; ++i)
 		{
 			renderTargets[i].Reset();
 		}
+		depthBuffer.Reset();
 		swapChain->ResizeBuffers(2, width(), height(), DXGI_FORMAT_R8G8B8A8_UNORM, 0);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
 		UINT rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
 		for (UINT i = 0; i < 2; i++)
 		{
 			swapChain->GetBuffer(i, IID_PPV_ARGS(&renderTargets[i]));
 			device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
 			rtvHandle.ptr += rtvDescriptorSize;
 		}
+		// Create depth stencil descriptor heap
+		D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+		dsvHeapDesc.NumDescriptors = 1;
+		dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+		dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		if (FAILED(device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvHeap))))
+		{
+			throw std::runtime_error("Failed to create depth stencil descriptor heap");
+		}
+
+		// Create depth stencil buffer
+		D3D12_RESOURCE_DESC depthDesc = {};
+		depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		depthDesc.Alignment = 0;
+		depthDesc.Width = width();
+		depthDesc.Height = height();
+		depthDesc.DepthOrArraySize = 1;
+		depthDesc.MipLevels = 1;
+		depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		depthDesc.SampleDesc.Count = 1;
+		depthDesc.SampleDesc.Quality = 0;
+		depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+		D3D12_HEAP_PROPERTIES depthHeapProps = {};
+		depthHeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+		depthHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		depthHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		depthHeapProps.CreationNodeMask = 1;
+		depthHeapProps.VisibleNodeMask = 1;
+
+		D3D12_CLEAR_VALUE depthClearValue = {};
+		depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+		depthClearValue.DepthStencil.Depth = 1.0f;
+		depthClearValue.DepthStencil.Stencil = 0;
+
+		if (FAILED(device->CreateCommittedResource(
+			&depthHeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&depthDesc,
+			D3D12_RESOURCE_STATE_DEPTH_WRITE,
+			&depthClearValue,
+			IID_PPV_ARGS(&depthBuffer))))
+		{
+			throw std::runtime_error("Failed to create depth buffer");
+		}
+
+		// Create depth stencil view
+		D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+		dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+		dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+		device->CreateDepthStencilView(depthBuffer.Get(), &dsvDesc, dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
 	}
 	QWidget::resizeEvent(event);
 }
