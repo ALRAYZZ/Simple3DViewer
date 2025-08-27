@@ -43,6 +43,7 @@ protected:
 	void mousePressEvent(QMouseEvent* event) override;
 	void mouseMoveEvent(QMouseEvent* event) override;
 	void wheelEvent(QWheelEvent* event) override;
+	void keyPressEvent(QKeyEvent* event) override;
 
 private:
 	// D3D12 core components that need to be managed to render within the widget
@@ -79,4 +80,8 @@ private:
 
 	ComPtr<ID3D12Resource> depthBuffer; // Depth buffer resource
 	ComPtr<ID3D12DescriptorHeap> dsvHeap; // Depth stencil view descriptor heap
+
+	// Light rotation variables
+	float lightYaw = 45.0f;
+	float lightPitch = 45.0f;
 };

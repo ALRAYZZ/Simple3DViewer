@@ -14,6 +14,16 @@
 
 using namespace DirectX;
 
+struct ConstantBufferData
+{
+	XMFLOAT4X4 mvpMatrix;
+	XMFLOAT4X4 modelMatrix;
+	XMFLOAT4X4 normalMatrix;
+	XMFLOAT3 lightDirection;
+	float padding[13];
+};
+static_assert((sizeof(ConstantBufferData) % 256) == 0, "ConstantBufferData size must be 256-byte aligned");
+
 D3D12Viewport::D3D12Viewport(QWidget* parent) : QWidget(parent), frameIndex(0), fenceValue(0)
 {
 	setAttribute(Qt::WA_PaintOnScreen, true);
@@ -243,17 +253,7 @@ void D3D12Viewport::initializeD3D12()
 	D3D12_RESOURCE_DESC cbDesc = {};
 	cbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 	cbDesc.Alignment = 0;
-
-	struct ConstantBufferData
-	{
-		XMFLOAT4X4 mvpMatrix;
-		XMFLOAT4X4 modelMatrix;
-		XMFLOAT4X4 normalMatrix;
-		XMFLOAT4X4 padding;
-	};
-	static_assert((sizeof(ConstantBufferData) % 256) == 0, "Constant buffer size must be 256-byte aligned");
 	cbDesc.Width = sizeof(ConstantBufferData);
-
 	cbDesc.Height = 1;
 	cbDesc.DepthOrArraySize = 1;
 	cbDesc.MipLevels = 1;
@@ -519,17 +519,29 @@ void D3D12Viewport::paintEvent(QPaintEvent*)
 		auto modelMatrix = XMMatrixIdentity(); 
 		auto normalMatrix = XMMatrixInverse(nullptr, XMMatrixTranspose(modelMatrix));
 
-		// Update constant buffer with all matrices
-		struct ConstantBufferData
-		{
-			XMFLOAT4X4 mvpMatrix;
-			XMFLOAT4X4 modelMatrix;
-			XMFLOAT4X4 normalMatrix;
-		} cbData;
+		ConstantBufferData cbData;
 
 		XMStoreFloat4x4(&cbData.mvpMatrix, XMLoadFloat4x4(&mvpMatrix));
 		XMStoreFloat4x4(&cbData.modelMatrix, modelMatrix);
 		XMStoreFloat4x4(&cbData.normalMatrix, normalMatrix);
+
+		// Calculate light direction from yaw and pitch
+		float lightYawRad = XMConvertToRadians(lightYaw);
+		float lightPitchRad = XMConvertToRadians(lightPitch);
+
+		// Calculate light direction vector
+		XMFLOAT3 lightDirection;
+		lightDirection.x = cos(lightPitchRad) * cos(lightYawRad);
+		lightDirection.y = sin(lightPitchRad);
+		lightDirection.z = cos(lightPitchRad) * sin(lightYawRad);
+
+		// Normalize the light direction
+		XMVECTOR lightDirVec = XMLoadFloat3(&lightDirection);
+		lightDirVec = XMVector3Normalize(lightDirVec);
+		XMStoreFloat3(&lightDirection, lightDirVec);
+
+		cbData.lightDirection = lightDirection;
+
 
 		void* mappedData;
 		D3D12_RANGE range = { 0, 0 };
@@ -718,6 +730,28 @@ void D3D12Viewport::mouseMoveEvent(QMouseEvent* event)
 void D3D12Viewport::wheelEvent(QWheelEvent* event)
 {
 	camera.zoom(event->angleDelta().y() / 120.0f); // Scroll sensitivity
+	update();
+}
+void D3D12Viewport::keyPressEvent(QKeyEvent* event)
+{
+	switch (event->key())
+	{
+	case Qt::Key_Q:
+		lightYaw -= 10.0f; // Rotate light left
+		break;
+	case Qt::Key_E:
+		lightYaw += 10.0f; // Rotate light right
+		break;
+	case Qt::Key_R:
+		lightPitch = std::clamp(lightPitch + 10.0f, -89.0f, 89.0f); // Rotate light up
+		break;
+	case Qt::Key_F:
+		lightPitch = std::clamp(lightPitch - 10.0f, -89.0f, 89.0f); // Rotate light down
+		break;
+	default:
+		QWidget::keyPressEvent(event);
+		return;
+	}
 	update();
 }
 
